@@ -209,11 +209,15 @@ func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- *packet) {
 		if p.isV4Avail {
 			var cm *ipv4.ControlMessage
 			n, cm, src, err = conn.IPv4PacketConn().ReadFrom(bytes)
-			ttl = cm.TTL
+			if cm != nil {
+				ttl = cm.TTL
+			}
 		} else {
 			var cm *ipv6.ControlMessage
 			n, cm, src, err = conn.IPv6PacketConn().ReadFrom(bytes)
-			ttl = cm.HopLimit
+			if cm != nil {
+				ttl = cm.HopLimit
+			}
 		}
 		if err != nil {
 			if neterr, ok := err.(*net.OpError); ok {
@@ -241,7 +245,7 @@ func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- *packet) {
 		}
 
 		err = errors.New("Request timeout")
-		rcvdChan <- &packet{bytes: []byte{}, addr: src, err: err}
+		rcvdChan <- &packet{bytes: []byte{}, addr: src, ttl: ttl, err: err}
 		break
 	}
 }
@@ -253,7 +257,6 @@ func (p *Ping) send(conn *icmp.PacketConn) {
 	var icmpType icmp.Type
 	if IsIPv4(p.addr.IP) {
 		icmpType = ipv4.ICMPTypeEcho
-		fmt.Println(p.ttl)
 		conn.IPv4PacketConn().SetTTL(p.ttl)
 		conn.IPv4PacketConn().SetControlMessage(ipv4.FlagTTL, true)
 	} else {
