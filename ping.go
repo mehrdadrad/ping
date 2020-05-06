@@ -83,6 +83,8 @@ type Ping struct {
 func NewPing(target string) (*Ping, error) {
 	var err error
 
+	rand.Seed(time.Now().UnixNano())
+
 	p := Ping{
 		id:        rand.Intn(0xffff),
 		seq:       -1,
@@ -108,6 +110,10 @@ func NewPing(target string) (*Ping, error) {
 	}
 
 	if p.timeout, err = time.ParseDuration("2s"); err != nil {
+		log.Fatal(err)
+	}
+
+	if p.interval, err = time.ParseDuration("1s"); err != nil {
 		log.Fatal(err)
 	}
 
@@ -139,6 +145,22 @@ func (p *Ping) SetForceV4() {
 func (p *Ping) SetForceV6() {
 	p.forceV4 = false
 	p.forceV6 = true
+}
+
+// SetInterval sets wait interval between sending each packet
+func (p *Ping) SetInterval(i string) {
+	var err error
+	if p.interval, err = time.ParseDuration(i); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// SetTimeout sets wait time for a reply for each packet sent
+func (p *Ping) SetTimeout(i string) {
+	var err error
+	if p.timeout, err = time.ParseDuration(i); err != nil {
+		log.Fatal(err)
+	}
 }
 
 // SetIP set ip address
@@ -238,25 +260,26 @@ func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		case IPv4ICMPTypeTimeExceeded:
 			if n >= 28 && p.isMyTimeExceeded(bytes) {
 				err = errors.New("Time exceeded")
-				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Error: err}
+				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
 		case IPv4ICMPTypeEchoReply, IPv6ICMPTypeEchoReply:
 			if n >= 8 && p.isMyReply(bytes) {
 				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes)) / 1000000
-				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, RTT: rtt, Error: err}
+				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, RTT: rtt, Error: err}
 				return
 			}
 		case IPv4ICMPTypeDestinationUnreachable:
 			if n >= 28 && p.isMyDestUnreach(bytes) {
 				err = errors.New(unreachableError(bytes))
-				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Error: err}
+				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
 		case IPv4ICMPTypeRedirect:
 			// TODO
 
 		default:
+			// TODO
 		}
 
 		if time.Since(ts) < p.timeout {
