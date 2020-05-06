@@ -64,8 +64,8 @@ type Ping struct {
 	interval  time.Duration
 }
 
-// NewPing constructs ping object
-func NewPing(target string) (*Ping, error) {
+// New constructs ping object
+func New(target string) (*Ping, error) {
 	var err error
 
 	rand.Seed(time.Now().UnixNano())
@@ -259,7 +259,7 @@ func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 			}
 		case int(ipv4.ICMPTypeEchoReply), int(ipv6.ICMPTypeEchoReply):
 			if n >= 8 && p.isMyReply(bytes) {
-				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes)) / 1000000
+				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes[8:])) / 1000000
 				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, RTT: rtt, Error: err}
 				return
 			}
@@ -336,8 +336,7 @@ func (p *Ping) payload() []byte {
 		timeBytes[i] = byte((ts >> (i * 8)) & 0xff)
 	}
 	payload := make([]byte, p.pSize-16)
-	payload = append(payload, timeBytes...)
-	return payload
+	return append(timeBytes, payload...)
 }
 
 func (p *Ping) parseMessage(m *packet) (*ipv4.Header, *icmp.Message, error) {
@@ -421,7 +420,7 @@ func (p *Ping) isMyReply(bytes []byte) bool {
 func getTimeStamp(m []byte) int64 {
 	var ts int64
 	for i := uint(0); i < 8; i++ {
-		ts += int64(m[uint(len(m))-8+i]) << (i * 8)
+		ts += int64(m[i]) << (i * 8)
 	}
 	return ts
 }
