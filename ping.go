@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"net"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -28,6 +27,8 @@ const (
 	IPv4ICMPTypeEchoReply = 0
 	// IPv4ICMPTypeDestinationUnreachable is ICMPv4 Destination Unreachable
 	IPv4ICMPTypeDestinationUnreachable = 3
+	// IPv4ICMPTypeRedirect is ICMPv4 Redirect
+	IPv4ICMPTypeRedirect = 5
 	// IPv4ICMPTypeTimeExceeded is ICMPv4 Time Exceeded
 	IPv4ICMPTypeTimeExceeded = 11
 
@@ -252,6 +253,8 @@ func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Error: err}
 				return
 			}
+		case IPv4ICMPTypeRedirect:
+			// TODO
 
 		default:
 		}
@@ -266,11 +269,12 @@ func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 	}
 }
 
-func (p *Ping) send(conn *icmp.PacketConn) {
+func (p *Ping) send(conn *icmp.PacketConn) error {
 	var (
-		wg sync.WaitGroup
+		icmpType icmp.Type
+		err      error
 	)
-	var icmpType icmp.Type
+
 	if IsIPv4(p.addr.IP) {
 		icmpType = ipv4.ICMPTypeEcho
 		conn.IPv4PacketConn().SetTTL(p.ttl)
@@ -291,26 +295,20 @@ func (p *Ping) send(conn *icmp.PacketConn) {
 		},
 	}).Marshal(nil)
 	if err != nil {
-		println(err.Error())
+		return err
 	}
 
-	wg.Add(1)
-	go func(conn *icmp.PacketConn, dest net.Addr, b []byte) {
-		defer wg.Done()
-		for {
-			if _, err := conn.WriteTo(bytes, dest); err != nil {
-				println(err.Error())
-				if neterr, ok := err.(*net.OpError); ok {
-					if neterr.Err == syscall.ENOBUFS {
-						continue
-					}
+	for range []int{0, 1} {
+		if _, err = conn.WriteTo(bytes, p.addr); err != nil {
+			if neterr, ok := err.(*net.OpError); ok {
+				if neterr.Err == syscall.ENOBUFS {
+					continue
 				}
 			}
-			break
 		}
-	}(conn, p.addr, bytes)
+	}
 
-	wg.Wait()
+	return err
 }
 
 func (p *Ping) payload() []byte {
@@ -361,8 +359,11 @@ func (p *Ping) Ping(out chan Response) {
 		defer conn.Close()
 	}
 
-	p.send(conn)
-	p.recv(conn, out)
+	if err := p.send(conn); err != nil {
+		out <- Response{Error: err, Addr: addr, Sequence: p.seq, Size: p.pSize}
+	} else {
+		p.recv(conn, out)
+	}
 }
 
 func (p *Ping) isMyTimeExceeded(bytes []byte) bool {
