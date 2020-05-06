@@ -194,12 +194,12 @@ func (p *Ping) listen(network string) (*icmp.PacketConn, error) {
 }
 
 // recv reads icmp message
-func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- *packet) {
+func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 	var (
-		err    error
-		src    net.Addr
-		ts     = time.Now()
-		n, ttl int
+		err              error
+		src              net.Addr
+		ts               = time.Now()
+		n, ttl, icmpType int
 	)
 
 	bytes := make([]byte, 1500)
@@ -230,14 +230,30 @@ func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- *packet) {
 		bytes = bytes[:n]
 
 		if n > 0 {
-			respID := int(bytes[4])<<8 | int(bytes[5])
-			respSq := int(bytes[6])<<8 | int(bytes[7])
-			if respID == p.id && respSq == p.seq {
-				rcvdChan <- &packet{bytes: bytes, addr: src, ttl: ttl, err: err}
-				break
-			} else if time.Since(ts) < p.timeout {
-				continue
+			icmpType = int(bytes[0])
+		}
+
+		switch icmpType {
+		case IPv4ICMPTypeTimeExceeded:
+			if n >= 28 && p.isMyTimeExceeded(bytes) {
+				err = errors.New("Time exceeded")
+				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Error: err}
+				return
 			}
+		case IPv4ICMPTypeEchoReply, IPv6ICMPTypeEchoReply:
+			if n >= 8 && p.isMyReply(bytes) {
+				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes)) / 1000000
+				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, RTT: rtt, Error: err}
+				return
+			}
+		case IPv4ICMPTypeDestinationUnreachable:
+			if n >= 28 && p.isMyDestUnreach(bytes) {
+				err = errors.New(unreachableError(bytes))
+				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Error: err}
+				return
+			}
+
+		default:
 		}
 
 		if time.Since(ts) < p.timeout {
@@ -245,7 +261,7 @@ func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- *packet) {
 		}
 
 		err = errors.New("Request timeout")
-		rcvdChan <- &packet{bytes: []byte{}, addr: src, ttl: ttl, err: err}
+		rcvdChan <- Response{Error: err}
 		break
 	}
 }
@@ -326,10 +342,9 @@ func (p *Ping) parseMessage(m *packet) (*ipv4.Header, *icmp.Message, error) {
 // Ping tries to send and receive ICMP packets
 func (p *Ping) Ping(out chan Response) {
 	var (
-		conn     *icmp.PacketConn
-		err      error
-		addr     string       = p.addr.String()
-		rcvdChan chan *packet = make(chan *packet, 1)
+		conn *icmp.PacketConn
+		err  error
+		addr string = p.addr.String()
 	)
 
 	if p.isV4Avail {
@@ -347,39 +362,41 @@ func (p *Ping) Ping(out chan Response) {
 	}
 
 	p.send(conn)
-	p.recv(conn, rcvdChan)
-	rm := <-rcvdChan
+	p.recv(conn, out)
+}
 
-	if rm.err != nil {
-		out <- Response{Error: rm.err, Sequence: p.seq, Addr: addr}
-		return
-	}
-	_, m, err := p.parseMessage(rm)
-	if err != nil {
-		out <- Response{Error: err, Sequence: p.seq, Addr: addr}
-		return
+func (p *Ping) isMyTimeExceeded(bytes []byte) bool {
+	n := 28
+	respID := int(bytes[n+4])<<8 | int(bytes[n+5])
+	respSq := int(bytes[n+6])<<8 | int(bytes[n+7])
+
+	if p.id == respID && p.seq == respSq {
+		return true
 	}
 
-	switch m.Body.(type) {
-	case *icmp.TimeExceeded:
-		out <- Response{Error: fmt.Errorf("time exceeded"), Sequence: p.seq, Addr: addr}
-	case *icmp.PacketTooBig:
-		out <- Response{Error: fmt.Errorf("packet too big"), Sequence: p.seq, Addr: addr}
-	case *icmp.DstUnreach:
-		out <- Response{Error: fmt.Errorf("destination unreachable"), Sequence: p.seq, Addr: addr}
-	case *icmp.Echo:
-		rtt := float64(time.Now().UnixNano()-getTimeStamp(rm.bytes)) / 1000000
-		out <- Response{
-			Size:     len(rm.bytes),
-			TTL:      rm.ttl,
-			Addr:     rm.addr.String(),
-			RTT:      rtt,
-			Sequence: p.seq,
-			Error:    nil,
-		}
-	default:
-		out <- Response{Error: fmt.Errorf("ICMP error"), Sequence: p.seq, Addr: addr}
+	return false
+}
+
+func (p *Ping) isMyDestUnreach(bytes []byte) bool {
+	n := 28
+	respID := int(bytes[n+4])<<8 | int(bytes[n+5])
+	respSq := int(bytes[n+6])<<8 | int(bytes[n+7])
+
+	if p.id == respID && p.seq == respSq {
+		return true
 	}
+
+	return false
+}
+
+func (p *Ping) isMyReply(bytes []byte) bool {
+	respID := int(bytes[4])<<8 | int(bytes[5])
+	respSq := int(bytes[6])<<8 | int(bytes[7])
+	if respID == p.id && respSq == p.seq {
+		return true
+	}
+
+	return false
 }
 
 func getTimeStamp(m []byte) int64 {
@@ -388,4 +405,29 @@ func getTimeStamp(m []byte) int64 {
 		ts += int64(m[uint(len(m))-8+i]) << (i * 8)
 	}
 	return ts
+}
+
+func unreachableError(bytes []byte) string {
+	code := int(bytes[1])
+	mtu := int(bytes[6])<<8 | int(bytes[7])
+	var errors = []string{
+		"Network unreachable",
+		"Network unreachable",
+		"Protocol unreachable",
+		"Port unreachable",
+		"The datagram is too big - next-hop MTU:" + string(mtu),
+		"Source route failed",
+		"Destination network unknown",
+		"Destination host unknown",
+		"Source host isolated",
+		"The destination network is administratively prohibited",
+		"The destination host is administratively prohibited",
+		"The network is unreachable for Type Of Service",
+		"The host is unreachable for Type Of Service",
+		"Communication administratively prohibited",
+		"Host precedence violation",
+		"Precedence cutoff in effect",
+	}
+
+	return errors[code]
 }
