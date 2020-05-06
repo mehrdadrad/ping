@@ -1,6 +1,7 @@
 package ping
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -201,6 +202,25 @@ func (p *Ping) Run() chan Response {
 	return r
 }
 
+// RunWithContext sends the ICMP message to destination / target with context
+func (p *Ping) RunWithContext(ctx context.Context) chan Response {
+	var r = make(chan Response, 1)
+	go func() {
+		for n := 0; n < p.count; n++ {
+			select {
+			case <-ctx.Done():
+			default:
+				p.Ping(r)
+				if n != p.count-1 {
+					time.Sleep(p.interval)
+				}
+			}
+		}
+		close(r)
+	}()
+	return r
+}
+
 // listen starts to listen incoming icmp
 func (p *Ping) listen(network string) (*icmp.PacketConn, error) {
 	c, err := icmp.ListenPacket(network, p.source)
@@ -354,7 +374,7 @@ func (p *Ping) parseMessage(m *packet) (*ipv4.Header, *icmp.Message, error) {
 	return h, msg, err
 }
 
-// Ping tries to send and receive ICMP packets
+// Ping sends and receives an ICMP packet
 func (p *Ping) Ping(out chan Response) {
 	var (
 		conn *icmp.PacketConn
