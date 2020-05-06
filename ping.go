@@ -230,8 +230,8 @@ func (p *Ping) listen(network string) (*icmp.PacketConn, error) {
 	return c, nil
 }
 
-// recv reads icmp message
-func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- Response) {
+// recv4 reads icmp message for IPv4
+func (p *Ping) recv4(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 	var (
 		err              error
 		src              net.Addr
@@ -243,19 +243,12 @@ func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 	conn.SetReadDeadline(time.Now().Add(p.timeout))
 
 	for {
-		if p.isV4Avail {
-			var cm *ipv4.ControlMessage
-			n, cm, src, err = conn.IPv4PacketConn().ReadFrom(bytes)
-			if cm != nil {
-				ttl = cm.TTL
-			}
-		} else {
-			var cm *ipv6.ControlMessage
-			n, cm, src, err = conn.IPv6PacketConn().ReadFrom(bytes)
-			if cm != nil {
-				ttl = cm.HopLimit
-			}
+		var cm *ipv4.ControlMessage
+		n, cm, src, err = conn.IPv4PacketConn().ReadFrom(bytes)
+		if cm != nil {
+			ttl = cm.TTL
 		}
+
 		if err != nil {
 			if neterr, ok := err.(*net.OpError); ok {
 				if neterr.Timeout() {
@@ -272,26 +265,100 @@ func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 
 		switch icmpType {
 		case int(ipv4.ICMPTypeTimeExceeded):
-			if n >= 28 && p.isMyTimeExceeded(bytes) {
+			if n >= 28 && p.isMyReply(bytes) {
 				err = errors.New("Time exceeded")
 				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
-		case int(ipv4.ICMPTypeEchoReply), int(ipv6.ICMPTypeEchoReply):
-			if n >= 8 && p.isMyReply(bytes) {
+		case int(ipv4.ICMPTypeEchoReply):
+			if n >= 8 && p.isMyEchoReply(bytes) {
 				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes[8:])) / 1000000
 				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, RTT: rtt, Error: err}
 				return
 			}
 		case int(ipv4.ICMPTypeDestinationUnreachable):
-			if n >= 28 && p.isMyDestUnreach(bytes) {
-				err = errors.New(unreachableError(bytes))
+			if n >= 28 && p.isMyReply(bytes) {
+				err = errors.New(unreachableMessage(bytes))
 				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
 		case int(ipv4.ICMPTypeRedirect):
+			if n >= 28 && p.isMyReply(bytes) {
+				err = errors.New(redirectMessage(bytes))
+				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				return
+			}
+		default:
 			// TODO
+		}
 
+		if time.Since(ts) < p.timeout {
+			continue
+		}
+
+		err = errors.New("Request timeout")
+		rcvdChan <- Response{Error: err}
+		break
+	}
+}
+
+// recv6 reads icmp message for IPv6
+func (p *Ping) recv6(conn *icmp.PacketConn, rcvdChan chan<- Response) {
+	var (
+		err              error
+		src              net.Addr
+		ts               = time.Now()
+		n, ttl, icmpType int
+	)
+
+	bytes := make([]byte, 1500)
+	conn.SetReadDeadline(time.Now().Add(p.timeout))
+
+	for {
+		var cm *ipv6.ControlMessage
+		n, cm, src, err = conn.IPv6PacketConn().ReadFrom(bytes)
+		if cm != nil {
+			ttl = cm.HopLimit
+		}
+		if err != nil {
+			if neterr, ok := err.(*net.OpError); ok {
+				if neterr.Timeout() {
+					err = errors.New("Request timeout")
+				}
+			}
+		}
+
+		bytes = bytes[:n]
+
+		if n > 0 {
+			icmpType = int(bytes[0])
+		}
+
+		switch icmpType {
+		case int(ipv6.ICMPTypeTimeExceeded):
+			if n >= 48 && p.isMyReply(bytes) {
+				err = errors.New("Time exceeded")
+				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				return
+			}
+		case int(ipv6.ICMPTypeEchoReply):
+			if n >= 8 && p.isMyEchoReply(bytes) {
+				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes[8:])) / 1000000
+				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, RTT: rtt, Error: err}
+				return
+			}
+		case int(ipv6.ICMPTypeDestinationUnreachable):
+			if n >= 48 && p.isMyReply(bytes) {
+				err = errors.New(unreachableMessage(bytes))
+				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				return
+			}
+		case int(ipv6.ICMPTypeRedirect):
+			if n >= 48 && p.isMyReply(bytes) {
+				err = errors.New(redirectMessage(bytes))
+				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				return
+			}
 		default:
 			// TODO
 		}
@@ -399,35 +466,32 @@ func (p *Ping) Ping(out chan Response) {
 	if err := p.send(conn); err != nil {
 		out <- Response{Error: err, Addr: addr, Sequence: p.seq, Size: p.pSize}
 	} else {
-		p.recv(conn, out)
+		if p.isV4Avail {
+			p.recv4(conn, out)
+		} else {
+			p.recv6(conn, out)
+		}
 	}
-}
-
-func (p *Ping) isMyTimeExceeded(bytes []byte) bool {
-	n := 28
-	respID := int(bytes[n+4])<<8 | int(bytes[n+5])
-	respSq := int(bytes[n+6])<<8 | int(bytes[n+7])
-
-	if p.id == respID && p.seq == respSq {
-		return true
-	}
-
-	return false
-}
-
-func (p *Ping) isMyDestUnreach(bytes []byte) bool {
-	n := 28
-	respID := int(bytes[n+4])<<8 | int(bytes[n+5])
-	respSq := int(bytes[n+6])<<8 | int(bytes[n+7])
-
-	if p.id == respID && p.seq == respSq {
-		return true
-	}
-
-	return false
 }
 
 func (p *Ping) isMyReply(bytes []byte) bool {
+	n := 28
+
+	if !p.isV4Avail {
+		n = 48
+	}
+
+	respID := int(bytes[n+4])<<8 | int(bytes[n+5])
+	respSq := int(bytes[n+6])<<8 | int(bytes[n+7])
+
+	if p.id == respID && p.seq == respSq {
+		return true
+	}
+
+	return false
+}
+
+func (p *Ping) isMyEchoReply(bytes []byte) bool {
 	respID := int(bytes[4])<<8 | int(bytes[5])
 	respSq := int(bytes[6])<<8 | int(bytes[7])
 	if respID == p.id && respSq == p.seq {
@@ -445,7 +509,7 @@ func getTimeStamp(m []byte) int64 {
 	return ts
 }
 
-func unreachableError(bytes []byte) string {
+func unreachableMessage(bytes []byte) string {
 	code := int(bytes[1])
 	mtu := int(bytes[6])<<8 | int(bytes[7])
 	var errors = []string{
@@ -465,6 +529,18 @@ func unreachableError(bytes []byte) string {
 		"Communication administratively prohibited",
 		"Host precedence violation",
 		"Precedence cutoff in effect",
+	}
+
+	return errors[code]
+}
+
+func redirectMessage(bytes []byte) string {
+	code := int(bytes[1])
+	var errors = []string{
+		"Redirect for Network",
+		"Redirect for Host",
+		"Redirect for Type of Service and Network",
+		"Redirect for Type of Service and Host",
 	}
 
 	return errors[code]
