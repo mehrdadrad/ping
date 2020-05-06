@@ -55,7 +55,7 @@ type Ping struct {
 	count     int
 	addr      *net.IPAddr
 	addrs     []net.IP
-	target    string
+	host      string
 	isV4Avail bool
 	forceV4   bool
 	forceV6   bool
@@ -66,7 +66,7 @@ type Ping struct {
 }
 
 // New constructs ping object
-func New(target string) (*Ping, error) {
+func New(host string) (*Ping, error) {
 	var err error
 
 	rand.Seed(time.Now().UnixNano())
@@ -77,7 +77,7 @@ func New(target string) (*Ping, error) {
 		pSize:     64,
 		ttl:       64,
 		tos:       0,
-		target:    target,
+		host:      host,
 		isV4Avail: false,
 		count:     1,
 		forceV4:   false,
@@ -87,7 +87,7 @@ func New(target string) (*Ping, error) {
 	}
 
 	// resolve host
-	ips, err := net.LookupIP(target)
+	ips, err := net.LookupIP(host)
 	if err != nil {
 		return nil, err
 	}
@@ -113,8 +113,8 @@ func (p *Ping) SetCount(c int) {
 }
 
 // SetTTL sets the IPv4 packet TTL or IPv6 hop-limit for ICMP request packets
-func (p *Ping) SetTTL(c int) {
-	p.ttl = c
+func (p *Ping) SetTTL(t int) {
+	p.ttl = t
 }
 
 // SetPacketSize sets the ICMP packet size
@@ -442,7 +442,7 @@ func (p *Ping) parseMessage(m *packet) (*ipv4.Header, *icmp.Message, error) {
 }
 
 // Ping sends and receives an ICMP packet
-func (p *Ping) Ping(out chan Response) {
+func (p *Ping) Ping(resp chan Response) {
 	var (
 		conn *icmp.PacketConn
 		err  error
@@ -451,25 +451,25 @@ func (p *Ping) Ping(out chan Response) {
 
 	if p.isV4Avail {
 		if conn, err = p.listen("ip4:icmp"); err != nil {
-			out <- Response{Error: err, Addr: addr}
+			resp <- Response{Error: err, Addr: addr}
 			return
 		}
 		defer conn.Close()
 	} else {
 		if conn, err = p.listen("ip6:ipv6-icmp"); err != nil {
-			out <- Response{Error: err, Addr: addr}
+			resp <- Response{Error: err, Addr: addr}
 			return
 		}
 		defer conn.Close()
 	}
 
 	if err := p.send(conn); err != nil {
-		out <- Response{Error: err, Addr: addr, Sequence: p.seq, Size: p.pSize}
+		resp <- Response{Error: err, Addr: addr, Sequence: p.seq, Size: p.pSize}
 	} else {
 		if p.isV4Avail {
-			p.recv4(conn, out)
+			p.recv4(conn, resp)
 		} else {
-			p.recv6(conn, out)
+			p.recv6(conn, resp)
 		}
 	}
 }
