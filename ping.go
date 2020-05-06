@@ -22,22 +22,6 @@ const (
 	ProtocolIPv4ICMP = 1
 	// ProtocolIPv6ICMP is IANA ICMP IPv6
 	ProtocolIPv6ICMP = 58
-
-	// IPv4ICMPTypeEchoReply is ICMPv4 Echo Reply
-	IPv4ICMPTypeEchoReply = 0
-	// IPv4ICMPTypeDestinationUnreachable is ICMPv4 Destination Unreachable
-	IPv4ICMPTypeDestinationUnreachable = 3
-	// IPv4ICMPTypeRedirect is ICMPv4 Redirect
-	IPv4ICMPTypeRedirect = 5
-	// IPv4ICMPTypeTimeExceeded is ICMPv4 Time Exceeded
-	IPv4ICMPTypeTimeExceeded = 11
-
-	// IPv6ICMPTypeEchoReply is ICMPv6 Echo Reply
-	IPv6ICMPTypeEchoReply = 129
-	// IPv6ICMPTypeDestinationUnreachable is ICMPv6 Destination Unreachable
-	IPv6ICMPTypeDestinationUnreachable = 1
-	//IPv6ICMPTypeTimeExceeded is ICMPv6 Time Exceeded
-	IPv6ICMPTypeTimeExceeded = 3
 )
 
 // packet represents ping packet
@@ -66,6 +50,7 @@ type Ping struct {
 	seq       int
 	pSize     int
 	ttl       int
+	tos       int
 	count     int
 	addr      *net.IPAddr
 	addrs     []net.IP
@@ -90,6 +75,7 @@ func NewPing(target string) (*Ping, error) {
 		seq:       -1,
 		pSize:     64,
 		ttl:       64,
+		tos:       0,
 		target:    target,
 		isV4Avail: false,
 		count:     1,
@@ -105,7 +91,7 @@ func NewPing(target string) (*Ping, error) {
 		return nil, err
 	}
 	p.addrs = ips
-	if err := p.SetIP(ips); err != nil {
+	if err := p.setIP(ips); err != nil {
 		return nil, err
 	}
 
@@ -125,7 +111,7 @@ func (p *Ping) SetCount(c int) {
 	p.count = c
 }
 
-// SetTTL sets the IPv4 packet TTL or IPv6 hop-limit
+// SetTTL sets the IPv4 packet TTL or IPv6 hop-limit for ICMP request packets
 func (p *Ping) SetTTL(c int) {
 	p.ttl = c
 }
@@ -163,8 +149,16 @@ func (p *Ping) SetTimeout(i string) {
 	}
 }
 
-// SetIP set ip address
-func (p *Ping) SetIP(ips []net.IP) error {
+// SetTOS sets type of service for each echo request packet
+func (p *Ping) SetTOS(t int) {
+	if t > 2555 && t < 0 {
+		log.Fatal("invalid TOS")
+	}
+	p.tos = t
+}
+
+// setIP set ip address
+func (p *Ping) setIP(ips []net.IP) error {
 	for _, ip := range ips {
 		if IsIPv4(ip) && !p.forceV6 {
 			p.addr = &net.IPAddr{IP: ip}
@@ -257,25 +251,25 @@ func (p *Ping) recv(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		}
 
 		switch icmpType {
-		case IPv4ICMPTypeTimeExceeded:
+		case int(ipv4.ICMPTypeTimeExceeded):
 			if n >= 28 && p.isMyTimeExceeded(bytes) {
 				err = errors.New("Time exceeded")
 				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
-		case IPv4ICMPTypeEchoReply, IPv6ICMPTypeEchoReply:
+		case int(ipv4.ICMPTypeEchoReply), int(ipv6.ICMPTypeEchoReply):
 			if n >= 8 && p.isMyReply(bytes) {
 				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes)) / 1000000
 				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, RTT: rtt, Error: err}
 				return
 			}
-		case IPv4ICMPTypeDestinationUnreachable:
+		case int(ipv4.ICMPTypeDestinationUnreachable):
 			if n >= 28 && p.isMyDestUnreach(bytes) {
 				err = errors.New(unreachableError(bytes))
 				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
-		case IPv4ICMPTypeRedirect:
+		case int(ipv4.ICMPTypeRedirect):
 			// TODO
 
 		default:
@@ -302,6 +296,7 @@ func (p *Ping) send(conn *icmp.PacketConn) error {
 		icmpType = ipv4.ICMPTypeEcho
 		conn.IPv4PacketConn().SetTTL(p.ttl)
 		conn.IPv4PacketConn().SetControlMessage(ipv4.FlagTTL, true)
+		conn.IPv4PacketConn().SetTOS(p.tos)
 	} else {
 		icmpType = ipv6.ICMPTypeEchoRequest
 		conn.IPv6PacketConn().SetHopLimit(p.ttl)
