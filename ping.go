@@ -172,7 +172,7 @@ func (p *Ping) setIP(ips []net.IP) error {
 				p.addr = &net.IPAddr{IP: ip}
 				p.network = "ip4:icmp"
 			} else {
-				p.addr = &net.UDPAddr{IP: ip, Port: 10055}
+				p.addr = &net.UDPAddr{IP: ip, Port: 0}
 				p.network = "udp4"
 			}
 
@@ -184,7 +184,7 @@ func (p *Ping) setIP(ips []net.IP) error {
 				p.addr = &net.IPAddr{IP: ip}
 				p.network = "ip6:ipv6-icmp"
 			} else {
-				p.addr = &net.UDPAddr{IP: ip, Port: 10055}
+				p.addr = &net.UDPAddr{IP: ip, Port: 0}
 				p.network = "udp6"
 			}
 
@@ -423,7 +423,7 @@ func (p *Ping) send(conn *icmp.PacketConn) error {
 		Body: &icmp.Echo{
 			ID:   p.id,
 			Seq:  p.seq,
-			Data: p.payload(),
+			Data: p.payload(time.Now().UnixNano()),
 		},
 	}).Marshal(nil)
 	if err != nil {
@@ -443,9 +443,8 @@ func (p *Ping) send(conn *icmp.PacketConn) error {
 	return err
 }
 
-func (p *Ping) payload() []byte {
+func (p *Ping) payload(ts int64) []byte {
 	timeBytes := make([]byte, 8)
-	ts := time.Now().UnixNano()
 	for i := uint8(0); i < 8; i++ {
 		timeBytes[i] = byte((ts >> (i * 8)) & 0xff)
 	}
