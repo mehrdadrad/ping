@@ -17,8 +17,6 @@ import (
 )
 
 const (
-	// DefaultTXTimeout is socket send timeout
-	DefaultTXTimeout int64 = 2000
 	// ProtocolIPv4ICMP is IANA ICMP IPv4
 	ProtocolIPv4ICMP = 1
 	// ProtocolIPv6ICMP is IANA ICMP IPv6
@@ -40,29 +38,29 @@ type Response struct {
 	TTL      int
 	Sequence int
 	Addr     string
-	Timeout  bool
 	Error    error
 }
 
 // Ping represents ping
 type Ping struct {
-	m         icmp.Message
-	id        int
-	seq       int
-	pSize     int
-	ttl       int
-	tos       int
-	count     int
-	addr      *net.IPAddr
-	addrs     []net.IP
-	host      string
-	isV4Avail bool
-	forceV4   bool
-	forceV6   bool
-	network   string
-	source    string
-	timeout   time.Duration
-	interval  time.Duration
+	m          icmp.Message
+	id         int
+	seq        int
+	pSize      int
+	ttl        int
+	tos        int
+	count      int
+	addr       net.Addr
+	addrs      []net.IP
+	host       string
+	isV4Avail  bool
+	forceV4    bool
+	forceV6    bool
+	privileged bool
+	network    string
+	source     string
+	timeout    time.Duration
+	interval   time.Duration
 }
 
 // New constructs ping object
@@ -72,18 +70,19 @@ func New(host string) (*Ping, error) {
 	rand.Seed(time.Now().UnixNano())
 
 	p := Ping{
-		id:        rand.Intn(0xffff),
-		seq:       -1,
-		pSize:     64,
-		ttl:       64,
-		tos:       0,
-		host:      host,
-		isV4Avail: false,
-		count:     1,
-		forceV4:   false,
-		forceV6:   false,
-		network:   "ip",
-		source:    "",
+		id:         rand.Intn(0xffff),
+		seq:        -1,
+		pSize:      64,
+		ttl:        64,
+		tos:        0,
+		host:       host,
+		isV4Avail:  false,
+		count:      1,
+		forceV4:    false,
+		forceV6:    false,
+		privileged: false,
+		network:    "ip",
+		source:     "",
 	}
 
 	// resolve host
@@ -92,9 +91,6 @@ func New(host string) (*Ping, error) {
 		return nil, err
 	}
 	p.addrs = ips
-	if err := p.setIP(ips); err != nil {
-		return nil, err
-	}
 
 	if p.timeout, err = time.ParseDuration("2s"); err != nil {
 		log.Fatal(err)
@@ -105,6 +101,11 @@ func New(host string) (*Ping, error) {
 	}
 
 	return &p, nil
+}
+
+// SetSrcIPAddr sets the source ip address
+func (p *Ping) SetSrcIPAddr(addr string) {
+	p.source = addr
 }
 
 // SetCount sets the count packets
@@ -134,6 +135,11 @@ func (p *Ping) SetForceV6() {
 	p.forceV6 = true
 }
 
+// SetPrivilegedICMP sets privileged raw ICMP or non-privileged datagram-oriented ICMP
+func (p *Ping) SetPrivilegedICMP(i bool) {
+	p.privileged = i
+}
+
 // SetInterval sets wait interval between sending each packet
 func (p *Ping) SetInterval(i string) {
 	var err error
@@ -152,7 +158,7 @@ func (p *Ping) SetTimeout(i string) {
 
 // SetTOS sets type of service for each echo request packet
 func (p *Ping) SetTOS(t int) {
-	if t > 2555 && t < 0 {
+	if t > 255 && t < 0 {
 		log.Fatal("invalid TOS")
 	}
 	p.tos = t
@@ -161,56 +167,75 @@ func (p *Ping) SetTOS(t int) {
 // setIP set ip address
 func (p *Ping) setIP(ips []net.IP) error {
 	for _, ip := range ips {
-		if IsIPv4(ip) && !p.forceV6 {
-			p.addr = &net.IPAddr{IP: ip}
+		if !isIPv6(ip.String()) && !p.forceV6 {
+			if p.privileged {
+				p.addr = &net.IPAddr{IP: ip}
+				p.network = "ip4:icmp"
+			} else {
+				p.addr = &net.UDPAddr{IP: ip, Port: 10055}
+				p.network = "udp4"
+			}
+
 			p.isV4Avail = true
+
 			return nil
-		} else if IsIPv6(ip) && !p.forceV4 {
-			p.addr = &net.IPAddr{IP: ip}
+		} else if isIPv6(ip.String()) && !p.forceV4 {
+			if p.privileged {
+				p.addr = &net.IPAddr{IP: ip}
+				p.network = "ip6:ipv6-icmp"
+			} else {
+				p.addr = &net.UDPAddr{IP: ip, Port: 10055}
+				p.network = "udp6"
+			}
+
 			p.isV4Avail = false
+
 			return nil
 		}
 	}
+
 	return fmt.Errorf("there is not  A or AAAA record")
 }
 
-// IsIPv4 returns true if ip version is v4
-func IsIPv4(ip net.IP) bool {
-	return len(ip.To4()) == net.IPv4len
-}
-
-// IsIPv6 returns true if ip version is v6
-func IsIPv6(ip net.IP) bool {
-	if r := strings.Index(ip.String(), ":"); r != -1 {
-		return true
-	}
-	return false
+// isIPv6 returns true if ip version is v6
+func isIPv6(ip string) bool {
+	return strings.Count(ip, ":") >= 2
 }
 
 // Run sends the ICMP message to destination / target
-func (p *Ping) Run() chan Response {
+func (p *Ping) Run() (chan Response, error) {
 	var r = make(chan Response, 1)
+
+	if err := p.setIP(p.addrs); err != nil {
+		return nil, err
+	}
+
 	go func() {
 		for n := 0; n < p.count; n++ {
-			p.Ping(r)
+			p.ping(r)
 			if n != p.count-1 {
 				time.Sleep(p.interval)
 			}
 		}
 		close(r)
 	}()
-	return r
+	return r, nil
 }
 
 // RunWithContext sends the ICMP message to destination / target with context
-func (p *Ping) RunWithContext(ctx context.Context) chan Response {
+func (p *Ping) RunWithContext(ctx context.Context) (chan Response, error) {
 	var r = make(chan Response, 1)
+
+	if err := p.setIP(p.addrs); err != nil {
+		return nil, err
+	}
+
 	go func() {
 		for n := 0; n < p.count; n++ {
 			select {
 			case <-ctx.Done():
 			default:
-				p.Ping(r)
+				p.ping(r)
 				if n != p.count-1 {
 					time.Sleep(p.interval)
 				}
@@ -218,7 +243,8 @@ func (p *Ping) RunWithContext(ctx context.Context) chan Response {
 		}
 		close(r)
 	}()
-	return r
+
+	return r, nil
 }
 
 // listen starts to listen incoming icmp
@@ -267,25 +293,25 @@ func (p *Ping) recv4(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		case int(ipv4.ICMPTypeTimeExceeded):
 			if n >= 28 && p.isMyReply(bytes) {
 				err = errors.New("Time exceeded")
-				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
 		case int(ipv4.ICMPTypeEchoReply):
 			if n >= 8 && p.isMyEchoReply(bytes) {
 				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes[8:])) / 1000000
-				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, RTT: rtt, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, RTT: rtt, Error: err}
 				return
 			}
 		case int(ipv4.ICMPTypeDestinationUnreachable):
 			if n >= 28 && p.isMyReply(bytes) {
 				err = errors.New(unreachableMessage(bytes))
-				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
 		case int(ipv4.ICMPTypeRedirect):
 			if n >= 28 && p.isMyReply(bytes) {
 				err = errors.New(redirectMessage(bytes))
-				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
 		default:
@@ -297,7 +323,7 @@ func (p *Ping) recv4(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		}
 
 		err = errors.New("Request timeout")
-		rcvdChan <- Response{Error: err}
+		rcvdChan <- Response{Addr: p.getIPAddr(src), Error: err}
 		break
 	}
 }
@@ -338,25 +364,25 @@ func (p *Ping) recv6(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		case int(ipv6.ICMPTypeTimeExceeded):
 			if n >= 48 && p.isMyReply(bytes) {
 				err = errors.New("Time exceeded")
-				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
 		case int(ipv6.ICMPTypeEchoReply):
 			if n >= 8 && p.isMyEchoReply(bytes) {
 				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes[8:])) / 1000000
-				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, RTT: rtt, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, RTT: rtt, Error: err}
 				return
 			}
 		case int(ipv6.ICMPTypeDestinationUnreachable):
 			if n >= 48 && p.isMyReply(bytes) {
 				err = errors.New(unreachableMessage(bytes))
-				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
 		case int(ipv6.ICMPTypeRedirect):
 			if n >= 48 && p.isMyReply(bytes) {
 				err = errors.New(redirectMessage(bytes))
-				rcvdChan <- Response{Addr: src.String(), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
 				return
 			}
 		default:
@@ -368,7 +394,7 @@ func (p *Ping) recv6(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		}
 
 		err = errors.New("Request timeout")
-		rcvdChan <- Response{Error: err}
+		rcvdChan <- Response{Addr: p.getIPAddr(src), Error: err}
 		break
 	}
 }
@@ -379,15 +405,16 @@ func (p *Ping) send(conn *icmp.PacketConn) error {
 		err      error
 	)
 
-	if IsIPv4(p.addr.IP) {
+	if isIPv6(p.addr.String()) {
+		icmpType = ipv6.ICMPTypeEchoRequest
+		conn.IPv6PacketConn().SetHopLimit(p.ttl)
+		conn.IPv6PacketConn().SetControlMessage(ipv6.FlagHopLimit, true)
+
+	} else {
 		icmpType = ipv4.ICMPTypeEcho
 		conn.IPv4PacketConn().SetTTL(p.ttl)
 		conn.IPv4PacketConn().SetControlMessage(ipv4.FlagTTL, true)
 		conn.IPv4PacketConn().SetTOS(p.tos)
-	} else {
-		icmpType = ipv6.ICMPTypeEchoRequest
-		conn.IPv6PacketConn().SetHopLimit(p.ttl)
-		conn.IPv6PacketConn().SetControlMessage(ipv6.FlagHopLimit, true)
 	}
 
 	p.seq++
@@ -441,8 +468,8 @@ func (p *Ping) parseMessage(m *packet) (*ipv4.Header, *icmp.Message, error) {
 	return h, msg, err
 }
 
-// Ping sends and receives an ICMP packet
-func (p *Ping) Ping(resp chan Response) {
+// ping sends and receives an ICMP packet
+func (p *Ping) ping(resp chan Response) {
 	var (
 		conn *icmp.PacketConn
 		err  error
@@ -450,13 +477,13 @@ func (p *Ping) Ping(resp chan Response) {
 	)
 
 	if p.isV4Avail {
-		if conn, err = p.listen("ip4:icmp"); err != nil {
+		if conn, err = p.listen(p.network); err != nil {
 			resp <- Response{Error: err, Addr: addr}
 			return
 		}
 		defer conn.Close()
 	} else {
-		if conn, err = p.listen("ip6:ipv6-icmp"); err != nil {
+		if conn, err = p.listen(p.network); err != nil {
 			resp <- Response{Error: err, Addr: addr}
 			return
 		}
@@ -464,7 +491,7 @@ func (p *Ping) Ping(resp chan Response) {
 	}
 
 	if err := p.send(conn); err != nil {
-		resp <- Response{Error: err, Addr: addr, Sequence: p.seq, Size: p.pSize}
+		resp <- Response{Error: err, Addr: p.getIPAddr(p.addr), Sequence: p.seq, Size: p.pSize}
 	} else {
 		if p.isV4Avail {
 			p.recv4(conn, resp)
@@ -499,6 +526,25 @@ func (p *Ping) isMyEchoReply(bytes []byte) bool {
 	}
 
 	return false
+}
+
+func (p *Ping) getIPAddr(a net.Addr) string {
+	switch a.(type) {
+	case *net.UDPAddr:
+		h, _, err := net.SplitHostPort(a.String())
+		if err != nil {
+			return "na"
+		}
+		return h
+	case *net.IPAddr:
+		return a.String()
+	}
+
+	h, _, err := net.SplitHostPort(p.addr.String())
+	if err != nil {
+		return "na"
+	}
+	return h
 }
 
 func getTimeStamp(m []byte) int64 {
