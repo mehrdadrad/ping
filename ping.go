@@ -21,6 +21,8 @@ const (
 	ProtocolIPv4ICMP = 1
 	// ProtocolIPv6ICMP is IANA ICMP IPv6
 	ProtocolIPv6ICMP = 58
+	// icmpHeaderSize is ICMP header size
+	icmpHeaderSize = 8
 )
 
 // packet represents ping packet
@@ -444,12 +446,26 @@ func (p *Ping) send(conn *icmp.PacketConn) error {
 }
 
 func (p *Ping) payload(ts int64) []byte {
-	timeBytes := make([]byte, 8)
+	data := make([]byte, 8)
+	n := icmpHeaderSize + 8
+
+	// add timestamp
 	for i := uint8(0); i < 8; i++ {
-		timeBytes[i] = byte((ts >> (i * 8)) & 0xff)
+		data[i] = byte((ts >> (i * 8)) & 0xff)
 	}
-	payload := make([]byte, p.pSize-16)
-	return append(timeBytes, payload...)
+
+	// add id if privileged icmp
+	if !p.privileged {
+		id := make([]byte, 2)
+		for i := uint8(0); i < 2; i++ {
+			id[i] = byte((int16(p.id) >> (i * 8)) & 0xff)
+		}
+		data = append(data, id...)
+		n += 2
+	}
+
+	payload := make([]byte, p.pSize-n)
+	return append(data, payload...)
 }
 
 func (p *Ping) parseMessage(m *packet) (*ipv4.Header, *icmp.Message, error) {
@@ -501,7 +517,7 @@ func (p *Ping) ping(resp chan Response) {
 }
 
 func (p *Ping) isMyReply(bytes []byte) bool {
-	n := 28
+	var n int = 28
 
 	if !p.isV4Avail {
 		n = 48
@@ -518,7 +534,14 @@ func (p *Ping) isMyReply(bytes []byte) bool {
 }
 
 func (p *Ping) isMyEchoReply(bytes []byte) bool {
-	respID := int(bytes[4])<<8 | int(bytes[5])
+	var respID int
+
+	if p.privileged {
+		respID = int(bytes[4])<<8 | int(bytes[5])
+	} else {
+		respID = int(bytes[17])<<8 | int(bytes[16])
+	}
+
 	respSq := int(bytes[6])<<8 | int(bytes[7])
 	if respID == p.id && respSq == p.seq {
 		return true
