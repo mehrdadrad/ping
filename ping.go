@@ -35,12 +35,12 @@ type packet struct {
 
 // Response represent ping response
 type Response struct {
-	RTT      float64
-	Size     int
-	TTL      int
-	Sequence int
-	Addr     string
-	Error    error
+	RTT  float64
+	Size int
+	TTL  int
+	Seq  int
+	Addr string
+	Err  error
 }
 
 // Ping represents ping
@@ -295,25 +295,25 @@ func (p *Ping) recv4(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		case int(ipv4.ICMPTypeTimeExceeded):
 			if n >= 28 && p.isMyReply(bytes) {
 				err = errors.New("Time exceeded")
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, Err: err}
 				return
 			}
 		case int(ipv4.ICMPTypeEchoReply):
 			if n >= 8 && p.isMyEchoReply(bytes) {
 				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes[8:])) / 1000000
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, RTT: rtt, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, RTT: rtt, Err: err}
 				return
 			}
 		case int(ipv4.ICMPTypeDestinationUnreachable):
 			if n >= 28 && p.isMyReply(bytes) {
 				err = errors.New(unreachableMessage(bytes))
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, Err: err}
 				return
 			}
 		case int(ipv4.ICMPTypeRedirect):
 			if n >= 28 && p.isMyReply(bytes) {
 				err = errors.New(redirectMessage(bytes))
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, Err: err}
 				return
 			}
 		default:
@@ -325,7 +325,7 @@ func (p *Ping) recv4(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		}
 
 		err = errors.New("Request timeout")
-		rcvdChan <- Response{Addr: p.getIPAddr(src), Error: err}
+		rcvdChan <- Response{Addr: p.getIPAddr(src), Err: err}
 		break
 	}
 }
@@ -366,25 +366,25 @@ func (p *Ping) recv6(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		case int(ipv6.ICMPTypeTimeExceeded):
 			if n >= 48 && p.isMyReply(bytes) {
 				err = errors.New("Time exceeded")
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, Err: err}
 				return
 			}
 		case int(ipv6.ICMPTypeEchoReply):
 			if n >= 8 && p.isMyEchoReply(bytes) {
 				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes[8:])) / 1000000
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, RTT: rtt, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, RTT: rtt, Err: err}
 				return
 			}
 		case int(ipv6.ICMPTypeDestinationUnreachable):
 			if n >= 48 && p.isMyReply(bytes) {
 				err = errors.New(unreachableMessage(bytes))
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, Err: err}
 				return
 			}
 		case int(ipv6.ICMPTypeRedirect):
 			if n >= 48 && p.isMyReply(bytes) {
 				err = errors.New(redirectMessage(bytes))
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Sequence: p.seq, Size: p.pSize, Error: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, Err: err}
 				return
 			}
 		default:
@@ -396,7 +396,7 @@ func (p *Ping) recv6(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		}
 
 		err = errors.New("Request timeout")
-		rcvdChan <- Response{Addr: p.getIPAddr(src), Error: err}
+		rcvdChan <- Response{Addr: p.getIPAddr(src), Err: err}
 		break
 	}
 }
@@ -493,20 +493,20 @@ func (p *Ping) ping(resp chan Response) {
 
 	if p.isV4Avail {
 		if conn, err = p.listen(p.network); err != nil {
-			resp <- Response{Error: err, Addr: addr}
+			resp <- Response{Err: err, Addr: addr}
 			return
 		}
 		defer conn.Close()
 	} else {
 		if conn, err = p.listen(p.network); err != nil {
-			resp <- Response{Error: err, Addr: addr}
+			resp <- Response{Err: err, Addr: addr}
 			return
 		}
 		defer conn.Close()
 	}
 
 	if err := p.send(conn); err != nil {
-		resp <- Response{Error: err, Addr: p.getIPAddr(p.addr), Sequence: p.seq, Size: p.pSize}
+		resp <- Response{Err: err, Addr: p.getIPAddr(p.addr), Seq: p.seq, Size: p.pSize}
 	} else {
 		if p.isV4Avail {
 			p.recv4(conn, resp)

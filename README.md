@@ -46,11 +46,11 @@ func main() {
 ```
 ```
 #go run main.go
-ping.Response{RTT:4.938, Size:64, TTL:56, Sequence:0, Addr:"172.217.5.206", Error:error(nil)}
-ping.Response{RTT:5.202, Size:64, TTL:56, Sequence:1, Addr:"172.217.5.206", Error:error(nil)}
-ping.Response{RTT:6.576, Size:64, TTL:56, Sequence:2, Addr:"172.217.5.206", Error:error(nil)}
-ping.Response{RTT:4.126, Size:64, TTL:56, Sequence:3, Addr:"172.217.5.206", Error:error(nil)}
-ping.Response{RTT:4.983, Size:64, TTL:56, Sequence:4, Addr:"172.217.5.206", Error:error(nil)}
+ping.Response{RTT:4.938, Size:64, TTL:56, Seq:0, Addr:"172.217.5.206", Err:error(nil)}
+ping.Response{RTT:5.202, Size:64, TTL:56, Seq:1, Addr:"172.217.5.206", Err:error(nil)}
+ping.Response{RTT:6.576, Size:64, TTL:56, Seq:2, Addr:"172.217.5.206", Err:error(nil)}
+ping.Response{RTT:4.126, Size:64, TTL:56, Seq:3, Addr:"172.217.5.206", Err:error(nil)}
+ping.Response{RTT:4.983, Size:64, TTL:56, Seq:4, Addr:"172.217.5.206", Err:error(nil)}
 
 ```
 
