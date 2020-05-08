@@ -12,6 +12,7 @@ Golang native ICMP-based ping IPv4 and IPv6 library
 - type of server
 - time to live
 - source ip address
+- incoming interface
 
 ## Supported platform
 - Linux

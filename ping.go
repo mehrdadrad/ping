@@ -398,7 +398,7 @@ func (p *Ping) recv6(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		case int(ipv6.ICMPTypeRedirect):
 			if n >= 48 && p.isMyReply(bytes) {
 				err = errors.New(redirectMessage(bytes))
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, Err: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: p.ifs[cm.IfIndex], Err: err}
 				return
 			}
 		default:
