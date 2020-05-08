@@ -80,13 +80,8 @@ func New(host string) (*Ping, error) {
 		ttl:        64,
 		tos:        0,
 		host:       host,
-		isV4Avail:  false,
 		count:      1,
-		forceV4:    false,
-		forceV6:    false,
-		privileged: false,
-		network:    "ip",
-		source:     "",
+		privileged: true,
 	}
 
 	// resolve host
@@ -220,15 +215,29 @@ func isIPv6(ip string) bool {
 
 // Run sends the ICMP message to destination / target
 func (p *Ping) Run() (chan Response, error) {
-	var r = make(chan Response, 1)
+	var (
+		r    = make(chan Response, 1)
+		conn *icmp.PacketConn
+		err  error
+	)
 
 	if err := p.setIP(p.addrs); err != nil {
 		return nil, err
 	}
 
+	if p.isV4Avail {
+		if conn, err = p.listen(); err != nil {
+			return nil, err
+		}
+	} else {
+		if conn, err = p.listen(); err != nil {
+			return nil, err
+		}
+	}
+
 	go func() {
 		for n := 0; n < p.count; n++ {
-			p.ping(r)
+			p.ping(conn, r)
 			if n != p.count-1 {
 				time.Sleep(p.interval)
 			}
@@ -240,18 +249,33 @@ func (p *Ping) Run() (chan Response, error) {
 
 // RunWithContext sends the ICMP message to destination / target with context
 func (p *Ping) RunWithContext(ctx context.Context) (chan Response, error) {
-	var r = make(chan Response, 1)
+	var (
+		r    = make(chan Response, 1)
+		conn *icmp.PacketConn
+		err  error
+	)
 
 	if err := p.setIP(p.addrs); err != nil {
 		return nil, err
+	}
+
+	if p.isV4Avail {
+		if conn, err = p.listen(); err != nil {
+			return nil, err
+		}
+	} else {
+		if conn, err = p.listen(); err != nil {
+			return nil, err
+		}
 	}
 
 	go func() {
 		for n := 0; n < p.count; n++ {
 			select {
 			case <-ctx.Done():
+				conn.Close()
 			default:
-				p.ping(r)
+				p.ping(conn, r)
 				if n != p.count-1 {
 					time.Sleep(p.interval)
 				}
@@ -264,8 +288,8 @@ func (p *Ping) RunWithContext(ctx context.Context) (chan Response, error) {
 }
 
 // listen starts to listen incoming icmp
-func (p *Ping) listen(network string) (*icmp.PacketConn, error) {
-	c, err := icmp.ListenPacket(network, p.source)
+func (p *Ping) listen() (*icmp.PacketConn, error) {
+	c, err := icmp.ListenPacket(p.network, p.source)
 	if err != nil {
 		return c, err
 	}
@@ -501,27 +525,7 @@ func (p *Ping) parseMessage(m *packet) (*ipv4.Header, *icmp.Message, error) {
 }
 
 // ping sends and receives an ICMP packet
-func (p *Ping) ping(resp chan Response) {
-	var (
-		conn *icmp.PacketConn
-		err  error
-		addr string = p.addr.String()
-	)
-
-	if p.isV4Avail {
-		if conn, err = p.listen(p.network); err != nil {
-			resp <- Response{Err: err, Addr: addr}
-			return
-		}
-		defer conn.Close()
-	} else {
-		if conn, err = p.listen(p.network); err != nil {
-			resp <- Response{Err: err, Addr: addr}
-			return
-		}
-		defer conn.Close()
-	}
-
+func (p *Ping) ping(conn *icmp.PacketConn, resp chan Response) {
 	if err := p.send(conn); err != nil {
 		resp <- Response{Err: err, Addr: p.getIPAddr(p.addr), Seq: p.seq, Size: p.pSize}
 	} else {
