@@ -13,6 +13,11 @@ Golang native ICMP-based ping IPv4 and IPv6 library
 - time to live
 - source ip address
 
+## Supported platform
+- Linux
+- macOS
+- Windows
+
 ## Usage & Example
 
 For usage and examples see the [Godoc](http://godoc.org/github.com/mehrdadrad/ping).
