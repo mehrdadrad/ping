@@ -440,6 +440,7 @@ func (p *Ping) send(conn *icmp.PacketConn) error {
 				}
 			}
 		}
+		break
 	}
 
 	return err
