@@ -8,19 +8,16 @@ import (
 )
 
 var p = Ping{
-	id:         rand.Intn(0xffff),
-	seq:        -1,
-	pSize:      64,
-	ttl:        64,
-	tos:        0,
-	host:       "127.0.0.1",
-	isV4Avail:  false,
-	count:      1,
-	forceV4:    false,
-	forceV6:    false,
-	privileged: false,
-	network:    "ip",
-	source:     "",
+	id:        rand.Intn(0xffff),
+	seq:       -1,
+	pSize:     64,
+	ttl:       64,
+	tos:       0,
+	host:      "127.0.0.1",
+	source:    "0.0.0.0",
+	isV4Avail: true,
+	count:     1,
+	network:   "udp4",
 }
 
 func TestNew(t *testing.T) {
@@ -59,5 +56,127 @@ func TestGetIPAddr(t *testing.T) {
 
 	if o != "192.168.10.1" {
 		t.Error("getIPAddr UDPAdd failed")
+	}
+}
+
+func TestListen(t *testing.T) {
+	conn, err := p.listen()
+	if err != nil {
+		t.Log("listen failed")
+	}
+
+	a := conn.IPv4PacketConn().LocalAddr()
+	if a.String() != "0.0.0.0:0" {
+		t.Error("expect to have 0.0.0.0 but, ", a.String())
+	}
+}
+
+func TestSendRecv4(t *testing.T) {
+
+	p, err := New("127.0.0.1")
+	if err != nil {
+		t.Error(err)
+	}
+
+	p.privileged = false
+	p.network = "udp4"
+
+	conn, err := p.listen()
+	if err != nil {
+		t.Log(err)
+	}
+
+	p.addr = &net.UDPAddr{
+		IP:   net.IP{127, 0, 0, 1},
+		Port: 0,
+	}
+
+	err = p.send(conn)
+	if err != nil {
+		t.Error(err)
+	}
+
+	rc := make(chan Response, 1)
+	p.recv4(conn, rc)
+	r := <-rc
+
+	if r.Err != nil {
+		t.Log(err)
+	}
+}
+
+func TestSendRecv6(t *testing.T) {
+
+	p, err := New("::1")
+	if err != nil {
+		t.Error(err)
+	}
+
+	p.privileged = false
+	p.network = "udp6"
+
+	conn, err := p.listen()
+	if err != nil {
+		t.Log("listen failed")
+	}
+
+	p.addr = &net.UDPAddr{
+		IP:   net.ParseIP("::1"),
+		Port: 0,
+	}
+
+	err = p.send(conn)
+	if err != nil {
+		t.Error(err)
+	}
+
+	rc := make(chan Response, 1)
+	p.recv6(conn, rc)
+	r := <-rc
+
+	if r.Err != nil {
+		t.Log(err)
+	}
+}
+
+func TestSetIP(t *testing.T) {
+	p, err := New("127.0.0.1")
+	if err != nil {
+		t.Error(err)
+	}
+
+	ips := []net.IP{net.ParseIP("127.0.0.1")}
+
+	p.privileged = true
+	p.setIP(ips)
+	if p.network != "ip4:icmp" {
+		t.Log("expected ip4:icmp but got", p.network)
+	}
+
+	p.privileged = false
+	p.setIP(ips)
+	if p.network != "udp4" {
+		t.Log("expected udp4 but got", p.network)
+	}
+}
+
+func TestSetIP6(t *testing.T) {
+	p, err := New("::1")
+	if err != nil {
+		t.Error(err)
+	}
+
+	ips := []net.IP{net.ParseIP("::1")}
+
+	p.privileged = true
+	p.setIP(ips)
+	if p.network != "ip6:icmp" {
+		t.Log("expected ip6:icmp but got", p.network)
+	}
+
+	p.privileged = false
+	p.setIP(ips)
+	if p.network != "udp6" {
+		t.Log("expected udp6 but got", p.network)
 	}
 }
