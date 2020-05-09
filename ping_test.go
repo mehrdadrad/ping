@@ -62,7 +62,7 @@ func TestGetIPAddr(t *testing.T) {
 func TestListen(t *testing.T) {
 	conn, err := p.listen()
 	if err != nil {
-		t.Log("listen failed")
+		t.Error(err)
 	}
 
 	a := conn.IPv4PacketConn().LocalAddr()
@@ -83,7 +83,7 @@ func TestSendRecv4(t *testing.T) {
 
 	conn, err := p.listen()
 	if err != nil {
-		t.Log(err)
+		t.Error(err)
 	}
 
 	p.addr = &net.UDPAddr{
@@ -101,7 +101,7 @@ func TestSendRecv4(t *testing.T) {
 	r := <-rc
 
 	if r.Err != nil {
-		t.Log(err)
+		t.Error(err)
 	}
 }
 
@@ -117,7 +117,7 @@ func TestSendRecv6(t *testing.T) {
 
 	conn, err := p.listen()
 	if err != nil {
-		t.Log("listen failed")
+		t.Error(err)
 	}
 
 	p.addr = &net.UDPAddr{
@@ -150,13 +150,13 @@ func TestSetIP(t *testing.T) {
 	p.privileged = true
 	p.setIP(ips)
 	if p.network != "ip4:icmp" {
-		t.Log("expected ip4:icmp but got", p.network)
+		t.Error("expected ip4:icmp but got", p.network)
 	}
 
 	p.privileged = false
 	p.setIP(ips)
 	if p.network != "udp4" {
-		t.Log("expected udp4 but got", p.network)
+		t.Error("expected udp4 but got", p.network)
 	}
 }
 
@@ -170,13 +170,13 @@ func TestSetIP6(t *testing.T) {
 
 	p.privileged = true
 	p.setIP(ips)
-	if p.network != "ip6:icmp" {
-		t.Log("expected ip6:icmp but got", p.network)
+	if p.network != "ip6:ipv6-icmp" {
+		t.Error("expected ip6:icmp but got", p.network)
 	}
 
 	p.privileged = false
 	p.setIP(ips)
 	if p.network != "udp6" {
-		t.Log("expected udp6 but got", p.network)
+		t.Error("expected udp6 but got", p.network)
 	}
 }
