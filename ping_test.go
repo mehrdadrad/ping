@@ -59,7 +59,7 @@ func TestGetIPAddr(t *testing.T) {
 	}
 }
 
-func TestListen(t *testing.T) {
+func testListen(t *testing.T) {
 	conn, err := p.listen()
 	if err != nil {
 		t.Error(err)
@@ -71,7 +71,7 @@ func TestListen(t *testing.T) {
 	}
 }
 
-func TestSendRecv4(t *testing.T) {
+func testSendRecv4(t *testing.T) {
 
 	p, err := New("127.0.0.1")
 	if err != nil {
@@ -105,7 +105,7 @@ func TestSendRecv4(t *testing.T) {
 	}
 }
 
-func TestSendRecv6(t *testing.T) {
+func testSendRecv6(t *testing.T) {
 
 	p, err := New("::1")
 	if err != nil {
