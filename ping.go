@@ -363,7 +363,7 @@ func (p *Ping) recv4(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		}
 
 		err = errors.New("Request timeout")
-		rcvdChan <- Response{Addr: p.getIPAddr(src), Err: err}
+		rcvdChan <- Response{Addr: p.getIPAddr(src), Seq: p.seq, Err: err}
 		break
 	}
 }
@@ -434,7 +434,7 @@ func (p *Ping) recv6(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		}
 
 		err = errors.New("Request timeout")
-		rcvdChan <- Response{Addr: p.getIPAddr(src), Err: err}
+		rcvdChan <- Response{Addr: p.getIPAddr(src), Seq: p.seq, Err: err}
 		break
 	}
 }
