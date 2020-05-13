@@ -55,7 +55,7 @@ type Ping struct {
 	count      int
 	addr       net.Addr
 	addrs      []net.IP
-	ifs        []string
+	ifs        map[int]string
 	host       string
 	isV4Avail  bool
 	forceV4    bool
@@ -96,7 +96,7 @@ func New(host string) (*Ping, error) {
 		log.Fatal(err)
 	}
 
-	p.ifs = make([]string, len(ifs)+1)
+	p.ifs = make(map[int]string)
 
 	p.ifs[0] = "na"
 	for i := range ifs {
