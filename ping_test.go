@@ -59,7 +59,7 @@ func TestGetIPAddr(t *testing.T) {
 	}
 }
 
-func testListen(t *testing.T) {
+func TestListen(t *testing.T) {
 	conn, err := p.listen()
 	if err != nil {
 		t.Error(err)
@@ -71,7 +71,7 @@ func testListen(t *testing.T) {
 	}
 }
 
-func testSendRecv4(t *testing.T) {
+func TestSendRecv4(t *testing.T) {
 
 	p, err := New("127.0.0.1")
 	if err != nil {
@@ -105,7 +105,7 @@ func testSendRecv4(t *testing.T) {
 	}
 }
 
-func testSendRecv6(t *testing.T) {
+func TestSendRecv6(t *testing.T) {
 
 	p, err := New("::1")
 	if err != nil {
@@ -178,5 +178,27 @@ func TestSetIP6(t *testing.T) {
 	p.setIP(ips)
 	if p.network != "udp6" {
 		t.Error("expected udp6 but got", p.network)
+	}
+}
+
+func TestSetSrcIPAddr(t *testing.T) {
+	p.SetSrcIPAddr("127.0.0.1")
+	if p.source != "127.0.0.1" {
+		t.Error("expected source 127.0.0.1 but got,", p.source)
+	}
+}
+
+func TestSetInterval(t *testing.T) {
+	err := p.SetInterval("2s")
+	if err != nil {
+		t.Error("unexpected error", err)
+	}
+	if p.interval != time.Second*2 {
+		t.Error("expected 2s interval but got", p.interval.String())
+	}
+
+	err = p.SetInterval("2")
+	if err == nil {
+		t.Error("expected to have error but nothing")
 	}
 }
