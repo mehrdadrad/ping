@@ -509,21 +509,6 @@ func (p *Ping) payload(ts int64) []byte {
 	return append(data, payload...)
 }
 
-func (p *Ping) parseMessage(m *packet) (*ipv4.Header, *icmp.Message, error) {
-	var proto = ProtocolIPv4ICMP
-	if !p.isV4Avail {
-		proto = ProtocolIPv6ICMP
-	}
-	msg, err := icmp.ParseMessage(proto, m.bytes)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	bytes, _ := msg.Body.Marshal(msg.Type.Protocol())
-	h, err := icmp.ParseIPv4Header(bytes)
-	return h, msg, err
-}
-
 // ping sends and receives an ICMP packet
 func (p *Ping) ping(conn *icmp.PacketConn, resp chan Response) {
 	if err := p.send(conn); err != nil {
@@ -538,7 +523,7 @@ func (p *Ping) ping(conn *icmp.PacketConn, resp chan Response) {
 }
 
 func (p *Ping) isMyReply(bytes []byte) bool {
-	var n int = 28
+	var n = 28
 
 	if !p.isV4Avail {
 		n = 48
