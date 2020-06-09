@@ -593,7 +593,7 @@ func unreachableMessage(bytes []byte) string {
 	mtu := int(bytes[6])<<8 | int(bytes[7])
 	var errors = []string{
 		"Network unreachable",
-		"Network unreachable",
+		"Host unreachable",
 		"Protocol unreachable",
 		"Port unreachable",
 		fmt.Sprintf("The datagram is too big - next-hop MTU: %d", mtu),
