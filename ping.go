@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"net"
 	"strings"
@@ -93,7 +92,7 @@ func New(host string) (*Ping, error) {
 
 	ifs, err := net.Interfaces()
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	p.ifs = make(map[int]string)
@@ -103,13 +102,8 @@ func New(host string) (*Ping, error) {
 		p.ifs[ifs[i].Index] = ifs[i].Name
 	}
 
-	if p.timeout, err = time.ParseDuration("2s"); err != nil {
-		log.Fatal(err)
-	}
-
-	if p.interval, err = time.ParseDuration("1s"); err != nil {
-		log.Fatal(err)
-	}
+	p.timeout, _ = time.ParseDuration("2s")
+	p.interval, _ = time.ParseDuration("1s")
 
 	return &p, nil
 }
@@ -152,27 +146,38 @@ func (p *Ping) SetPrivilegedICMP(i bool) {
 }
 
 // SetInterval sets wait interval between sending each packet
-func (p *Ping) SetInterval(i string) {
-	var err error
-	if p.interval, err = time.ParseDuration(i); err != nil {
-		log.Fatal(err)
+func (p *Ping) SetInterval(i string) error {
+	interval, err := time.ParseDuration(i)
+	if err != nil {
+		return err
 	}
+
+	p.interval = interval
+
+	return nil
 }
 
 // SetTimeout sets wait time for a reply for each packet sent
-func (p *Ping) SetTimeout(i string) {
-	var err error
-	if p.timeout, err = time.ParseDuration(i); err != nil {
-		log.Fatal(err)
+func (p *Ping) SetTimeout(i string) error {
+	timeout, err := time.ParseDuration(i)
+	if err != nil {
+		return err
 	}
+
+	p.timeout = timeout
+
+	return nil
 }
 
 // SetTOS sets type of service for each echo request packet
-func (p *Ping) SetTOS(t int) {
+func (p *Ping) SetTOS(t int) error {
 	if t > 255 && t < 0 {
-		log.Fatal("invalid TOS")
+		return fmt.Errorf("invalid tos")
 	}
+
 	p.tos = t
+
+	return nil
 }
 
 // setIP set ip address
@@ -591,7 +596,7 @@ func unreachableMessage(bytes []byte) string {
 		"Network unreachable",
 		"Protocol unreachable",
 		"Port unreachable",
-		"The datagram is too big - next-hop MTU:" + string(mtu),
+		fmt.Sprintf("The datagram is too big - next-hop MTU: %d", mtu),
 		"Source route failed",
 		"Destination network unknown",
 		"Destination host unknown",
