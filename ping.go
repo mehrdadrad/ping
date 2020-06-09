@@ -307,6 +307,7 @@ func (p *Ping) recv4(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		err              error
 		src              net.Addr
 		ts               = time.Now()
+		ifName           string
 		n, ttl, icmpType int
 	)
 
@@ -318,6 +319,9 @@ func (p *Ping) recv4(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		n, cm, src, err = conn.IPv4PacketConn().ReadFrom(bytes)
 		if cm != nil {
 			ttl = cm.TTL
+			ifName = p.ifs[cm.IfIndex]
+		} else {
+			ifName = "na"
 		}
 
 		if err != nil {
@@ -338,25 +342,25 @@ func (p *Ping) recv4(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		case int(ipv4.ICMPTypeTimeExceeded):
 			if n >= 28 && p.isMyReply(bytes) {
 				err = errors.New("Time exceeded")
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: p.ifs[cm.IfIndex], Err: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: ifName, Err: err}
 				return
 			}
 		case int(ipv4.ICMPTypeEchoReply):
 			if n >= 8 && p.isMyEchoReply(bytes) {
 				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes[8:])) / 1000000
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, RTT: rtt, If: p.ifs[cm.IfIndex], Err: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, RTT: rtt, If: ifName, Err: err}
 				return
 			}
 		case int(ipv4.ICMPTypeDestinationUnreachable):
 			if n >= 28 && p.isMyReply(bytes) {
 				err = errors.New(unreachableMessage(bytes))
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: p.ifs[cm.IfIndex], Err: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: ifName, Err: err}
 				return
 			}
 		case int(ipv4.ICMPTypeRedirect):
 			if n >= 28 && p.isMyReply(bytes) {
 				err = errors.New(redirectMessage(bytes))
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: p.ifs[cm.IfIndex], Err: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: ifName, Err: err}
 				return
 			}
 		default:
@@ -379,6 +383,7 @@ func (p *Ping) recv6(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		err              error
 		src              net.Addr
 		ts               = time.Now()
+		ifName           string
 		n, ttl, icmpType int
 	)
 
@@ -390,7 +395,11 @@ func (p *Ping) recv6(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		n, cm, src, err = conn.IPv6PacketConn().ReadFrom(bytes)
 		if cm != nil {
 			ttl = cm.HopLimit
+			ifName = p.ifs[cm.IfIndex]
+		} else {
+			ifName = "na"
 		}
+
 		if err != nil {
 			if neterr, ok := err.(*net.OpError); ok {
 				if neterr.Timeout() {
@@ -409,25 +418,25 @@ func (p *Ping) recv6(conn *icmp.PacketConn, rcvdChan chan<- Response) {
 		case int(ipv6.ICMPTypeTimeExceeded):
 			if n >= 48 && p.isMyReply(bytes) {
 				err = errors.New("Time exceeded")
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: p.ifs[cm.IfIndex], Err: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: ifName, Err: err}
 				return
 			}
 		case int(ipv6.ICMPTypeEchoReply):
 			if n >= 8 && p.isMyEchoReply(bytes) {
 				rtt := float64(time.Now().UnixNano()-getTimeStamp(bytes[8:])) / 1000000
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, RTT: rtt, If: p.ifs[cm.IfIndex], Err: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, RTT: rtt, If: ifName, Err: err}
 				return
 			}
 		case int(ipv6.ICMPTypeDestinationUnreachable):
 			if n >= 48 && p.isMyReply(bytes) {
 				err = errors.New(unreachableMessage(bytes))
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: p.ifs[cm.IfIndex], Err: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: ifName, Err: err}
 				return
 			}
 		case int(ipv6.ICMPTypeRedirect):
 			if n >= 48 && p.isMyReply(bytes) {
 				err = errors.New(redirectMessage(bytes))
-				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: p.ifs[cm.IfIndex], Err: err}
+				rcvdChan <- Response{Addr: p.getIPAddr(src), TTL: ttl, Seq: p.seq, Size: p.pSize, If: ifName, Err: err}
 				return
 			}
 		default:
