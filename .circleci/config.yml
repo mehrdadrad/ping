@@ -3,6 +3,7 @@ jobs:
   build:
     docker:
       - image: circleci/golang:1.14
+        user: root
 
     working_directory: /go/src/github.com/{{ORG_NAME}}/{{REPO_NAME}}
     steps:
