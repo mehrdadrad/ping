@@ -3,25 +3,31 @@ package ping
 import (
 	"math/rand"
 	"net"
+	"os"
 	"testing"
 	"time"
 )
 
-var p = Ping{
-	id:        rand.Intn(0xffff),
-	seq:       -1,
-	pSize:     64,
-	ttl:       64,
-	tos:       0,
-	host:      "127.0.0.1",
-	source:    "0.0.0.0",
-	isV4Avail: true,
-	count:     1,
-	network:   "udp4",
-}
+var (
+	HostV4 = getEnvHostV4()
+	HostV6 = getEnvHostV6()
+
+	p = Ping{
+		id:        rand.Intn(0xffff),
+		seq:       -1,
+		pSize:     64,
+		ttl:       64,
+		tos:       0,
+		host:      HostV4,
+		source:    "0.0.0.0",
+		isV4Avail: true,
+		count:     1,
+		network:   "udp4",
+	}
+)
 
 func TestNew(t *testing.T) {
-	_, err := New("127.0.0.1")
+	_, err := New(HostV4)
 	if err != nil {
 		t.Error("New failed:", err)
 	}
@@ -73,7 +79,7 @@ func TestListen(t *testing.T) {
 
 func TestSendRecv4(t *testing.T) {
 
-	p, err := New("127.0.0.1")
+	p, err := New(HostV4)
 	if err != nil {
 		t.Error(err)
 	}
@@ -87,7 +93,7 @@ func TestSendRecv4(t *testing.T) {
 	}
 
 	p.addr = &net.UDPAddr{
-		IP:   net.IP{127, 0, 0, 1},
+		IP:   net.ParseIP(HostV4),
 		Port: 0,
 	}
 
@@ -101,7 +107,7 @@ func TestSendRecv4(t *testing.T) {
 	r := <-rc
 
 	if r.Err != nil {
-		t.Error(err)
+		t.Error(r.Err)
 	}
 }
 
@@ -135,17 +141,17 @@ func TestSendRecv6(t *testing.T) {
 	r := <-rc
 
 	if r.Err != nil {
-		t.Log(err)
+		t.Error(r.Err)
 	}
 }
 
 func TestSetIP(t *testing.T) {
-	p, err := New("127.0.0.1")
+	p, err := New(HostV4)
 	if err != nil {
 		t.Error(err)
 	}
 
-	ips := []net.IP{net.ParseIP("127.0.0.1")}
+	ips := []net.IP{net.ParseIP(HostV4)}
 
 	p.privileged = true
 	p.setIP(ips)
@@ -182,8 +188,8 @@ func TestSetIP6(t *testing.T) {
 }
 
 func TestSetSrcIPAddr(t *testing.T) {
-	p.SetSrcIPAddr("127.0.0.1")
-	if p.source != "127.0.0.1" {
+	p.SetSrcIPAddr(HostV4)
+	if p.source != HostV4 {
 		t.Error("expected source 127.0.0.1 but got,", p.source)
 	}
 }
@@ -201,4 +207,70 @@ func TestSetInterval(t *testing.T) {
 	if err == nil {
 		t.Error("expected to have error but nothing")
 	}
+}
+
+func TestUnreachableMessage(t *testing.T) {
+
+	msg := unreachableMessage([]byte{0, 3, 0, 0, 0, 0, 0, 0})
+	if msg != "Port unreachable" {
+		t.Error("expected to get Port unreachable but got,", msg)
+	}
+}
+
+func TestIsMyEchoReply(t *testing.T) {
+	p.seq = 0
+	p.id = 8247
+	data := []byte{0x0, 0x0, 0xe9, 0xd, 0x20, 0x37, 0x0, 0x0, 0xb8,
+		0x20, 0xfb, 0xa1, 0xf5, 0xc1, 0x16, 0x16, 0x37, 0x20}
+	if ok := p.isMyEchoReply(data); !ok {
+		t.Error("expected to get true but got false")
+	}
+
+	p.privileged = true
+	if ok := p.isMyEchoReply(data); !ok {
+		t.Error("expected to get true but got false")
+	}
+
+}
+
+func TestRun(t *testing.T) {
+	p1, err := New(HostV4)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p1.SetPrivilegedICMP(false)
+	p1.SetCount(1)
+
+	r, err := p1.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := <-r
+	if result.Err != nil {
+		t.Fatal(result.Err)
+	}
+
+	if result.Addr != HostV4 {
+		t.Errorf("expect addr : %s but got %s", HostV4, result.Addr)
+	}
+}
+
+func getEnvHostV4() string {
+	h := os.Getenv("PING_HOST_V4")
+	if len(h) > 0 {
+		return h
+	}
+
+	return "127.0.0.1"
+}
+
+func getEnvHostV6() string {
+	h := os.Getenv("PING_HOST_V6")
+	if len(h) > 0 {
+		return h
+	}
+
+	return "::1"
 }
